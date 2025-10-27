@@ -1,0 +1,263 @@
+<html>
+
+<head>
+    <meta charset="utf-8" />
+    <title>TinyPHP Playground</title>
+    <script type="text/javascript" src="jquery-2.1.1.min.js"></script>
+    <script type="text/javascript" src="jquery.console.js"></script>
+    <script src="wasm_exec.js"></script>
+    <style type="text/css" media="screen">
+    div.term {
+        font-size: 14px;
+    }
+
+    div.term div.jquery-console-inner {
+        height: 90%;
+        background: black;
+        overflow: auto
+    }
+
+    div.term div.jquery-console-prompt-box {
+        color: white;
+        font-family: monospace;
+    }
+
+    div.term div.jquery-console-focus span.jquery-console-cursor {
+        background: #444;
+        color: #eee;
+        font-weight: bold
+    }
+
+    div.term div.jquery-console-message-error {
+        color: #ef0505;
+        font-family: monospace;
+        font-weight: bold;
+        padding: 0.1em;
+    }
+
+    div.term div.jquery-console-message-success {
+        color: #09f753;
+        font-family: monospace;
+        padding: 0.1em;
+        white-space: pre;
+    }
+
+    div.term div.jquery-console-welcome {
+        color: #839496;
+        font-family: monospace;
+        padding: 0.1em;
+        white-space: pre;
+    }
+
+    div.term span.jquery-console-prompt-label {
+        font-weight: bold;
+    }
+
+    body {
+        min-width: 100vw;
+        background-color: #000000;
+        overflow-x: hidden;
+    }
+
+    .loading-wrap {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 100vw;
+        font-family: "Poppins", sans-serif;
+        background-color: #000000;
+    }
+
+    .loading {
+        position: relative;
+        padding: 0.1em;
+        font-size: 8vw;
+        line-height: 1.2;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #222222;
+        border-bottom: 0.12em solid;
+    }
+
+    .loading-before {
+        position: absolute;
+        top: 0;
+        left: 0;
+        padding: inherit;
+        overflow: hidden;
+        color: green;
+        text-shadow: 0 0 0.2em;
+        border-bottom: inherit;
+        box-sizing: border-box;
+        width: 0%;
+    }
+
+    .animated {
+        animation: textAnim 2s infinite alternate linear;
+    }
+
+    @keyframes textAnim {
+        0% {
+            width: 0;
+        }
+
+        100% {
+            width: 100%;
+        }
+    }
+    </style>
+</head>
+
+<body>
+    <script>
+    function bootstrapGo() {
+        const go = new Go();
+        fetch("main.css")
+            .then(progressHandler)
+            .then(r => r.arrayBuffer())
+            .then(buffer => WebAssembly.instantiate(buffer, go.importObject))
+            .then(result => {
+                go.run(result.instance);
+                document.getElementById("loading").style.display = "none";
+                bootstrapTerm();
+            });
+    }
+
+    function bootstrapTerm() {
+        window.shellStack = [];
+        window.term = $('<div class="term">');
+        $('body').append(term);
+
+        let res = window.RunTinyPHPScript('echo date("Y-m-d");');
+        let now = res.out;
+        res = window.RunTinyPHPScript('echo VERSION;');
+        let version = res.out;
+
+        window.shell = term.console({
+            welcomeMessage: 'Welcome to TinyPHP Playground (Current version: ' + version + ').\nType `clear` to clear the terminal screen.\nExample:\n> echo date(\'Y-m-d\');\n' + now,
+            promptLabel: 'TinyPHP> ',
+            continuedPromptLabel: ' -> ',
+            commandValidate: function(line) {
+                if (line == "") {
+                    return false;
+                } else {
+                    return true;
+                }
+            },
+            commandHandle: function(line, report) {
+                if (line.split('\n').pop().trim().toLowerCase() == 'clear') {
+                    window.shell.continuedPrompt = false;
+                    window.shellStack = [];
+                    window.shell.reset();
+                    return;
+                }
+                if (line.trim().endsWith('{')) {
+                    window.shellStack.push('{');
+                    window.shell.continuedPrompt = true;
+                    return;
+                }
+                if (line.trim().endsWith('}')) {
+                    window.shellStack.pop();
+                    if (window.shellStack.length > 0) {
+                        window.shell.continuedPrompt = true;
+                    } else {
+                        window.shell.continuedPrompt = false;
+                        let res = window.RunTinyPHPScript(line);
+                        if (res.err) {
+                            report([{msg: res.err, className: "jquery-console-message-error"}]);
+                        } else {
+                            report([{msg: res.out, className: "jquery-console-message-success"}]);
+                        }
+                    }
+                    return;
+                }
+                if (line.trim().endsWith(';')) {
+                    if (window.shellStack.length > 0) {
+                        window.shell.continuedPrompt = true;
+                    } else {
+                        window.shell.continuedPrompt = false;
+                        let res = window.RunTinyPHPScript(line);
+                        if (res.err) {
+                            report([{msg: res.err, className: "jquery-console-message-error"}]);
+                        } else {
+                            report([{msg: res.out, className: "jquery-console-message-success"}]);
+                        }
+                    }
+                    return;
+                }
+
+                window.shell.continuedPrompt = true;
+            },
+            promptHistory: true,
+            autofocus: true
+        });
+    }
+
+    bootstrapGo();
+
+    function progress({
+        loaded,
+        total
+    }) {
+        const num = Math.round(loaded / total * 100) + '%'
+        $('.loading-before').css({
+            'width': num
+        })
+        if (num == '100%') {
+            $('.loading').html('<div class="loading-before">Running</div>Running')
+            $('.loading-before').addClass('animated')
+        }
+    }
+
+    function progressHandler(response) {
+        if (!response.ok) {
+            throw Error(response.status + ' ' + response.statusText)
+        }
+
+        if (!response.body) {
+            throw Error('ReadableStream not yet supported in this browser.')
+        }
+
+        // hardcode since some CDN does NOT return content-length for compressed content
+        const total =  1024*1024*5;
+        let loaded = 0;
+
+        return new Response(
+            new ReadableStream({
+                start(controller) {
+                    const reader = response.body.getReader();
+
+                    read();
+
+                    function read() {
+                        reader.read().then(({
+                            done,
+                            value
+                        }) => {
+                            if (done) {
+                                controller.close();
+                                return;
+                            }
+                            loaded += value.byteLength;
+                            progress({
+                                loaded,
+                                total
+                            })
+                            controller.enqueue(value);
+                            read();
+                        }).catch(error => {
+                            console.error(error);
+                            controller.error(error)
+                        })
+                    }
+                }
+            })
+        );
+    }
+    </script>
+    <div class="loading-wrap" id='loading'>
+        <h1 class="loading"><div class="loading-before">Loading…</div>Loading…</h1>
+    </div>
+</body>
+
+</html>
